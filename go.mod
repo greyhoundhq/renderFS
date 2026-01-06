@@ -1,4 +1,4 @@
-module github.com/your-org/renderfs
+module github.com/greyhoundhq/renderfs
 
 go 1.25.3
 
