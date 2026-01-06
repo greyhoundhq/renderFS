@@ -25,7 +25,7 @@ Because it accepts a generic `fs.FS`, you can feed RenderFS templates from:
 ## Installation
 
 ```bash
-go get github.com/your-org/renderfs
+go get github.com/greyhoundhq/renderfs
 ```
 
 ## Examples
@@ -40,8 +40,8 @@ import (
 	"fmt"
 
 	"github.com/flosch/pongo2/v6"
-	"github.com/your-org/renderfs"
-	"github.com/your-org/renderfs/writers"
+	"github.com/greyhoundhq/renderfs"
+	"github.com/greyhoundhq/renderfs/writers"
 )
 
 //go:embed templates/**
@@ -104,8 +104,8 @@ import (
 	"os"
 
 	"github.com/flosch/pongo2/v6"
-	"github.com/your-org/renderfs"
-	"github.com/your-org/renderfs/writers"
+	"github.com/greyhoundhq/renderfs"
+	"github.com/greyhoundhq/renderfs/writers"
 )
 
 func main() {
@@ -148,8 +148,8 @@ import (
 	"os"
 
 	"github.com/flosch/pongo2/v6"
-	"github.com/your-org/renderfs"
-	"github.com/your-org/renderfs/writers"
+	"github.com/greyhoundhq/renderfs"
+	"github.com/greyhoundhq/renderfs/writers"
 )
 
 func main() {

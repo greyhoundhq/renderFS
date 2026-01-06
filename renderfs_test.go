@@ -6,8 +6,8 @@ import (
 	"testing/fstest"
 
 	"github.com/flosch/pongo2/v6"
-	"github.com/your-org/renderfs"
-	"github.com/your-org/renderfs/writers"
+	"github.com/greyhoundhq/renderfs"
+	"github.com/greyhoundhq/renderfs/writers"
 )
 
 func TestCopyBasicRendering(t *testing.T) {

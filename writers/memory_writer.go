@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/renderfs"
+	"github.com/greyhoundhq/renderfs"
 )
 
 // MemoryFile stores rendered file contents and metadata in memory.

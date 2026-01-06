@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/your-org/renderfs"
+	"github.com/greyhoundhq/renderfs"
 )
 
 // OSWriter implements renderfs.Writer for the local filesystem rooted at DestDir.
