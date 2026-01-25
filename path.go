@@ -4,12 +4,20 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/nikolalohinski/gonja/v2/exec"
 )
 
 // RenderPath renders a template path and validates that it stays within destination.
 // It returns the cleaned path, whether it should be skipped, and any error encountered.
 func RenderPath(rel string, isDir bool, ctx map[string]any, strict bool) (string, bool, error) {
-	rendered, err := renderTemplateString(rel, ctx, strict)
+	return RenderPathWithEnv(rel, isDir, ctx, strict, nil)
+}
+
+// RenderPathWithEnv renders a template path and validates that it stays within destination.
+// It returns the cleaned path, whether it should be skipped, and any error encountered.
+func RenderPathWithEnv(rel string, isDir bool, ctx map[string]any, strict bool, env *exec.Environment) (string, bool, error) {
+	rendered, err := renderTemplateString(rel, ctx, strict, env)
 	if err != nil {
 		return "", false, err
 	}

@@ -27,6 +27,7 @@ func Copy(source fs.FS, dest Writer, opts Options) (Stats, error) {
 	if context == nil {
 		context = map[string]any{}
 	}
+	env := opts.Environment
 
 	conflict := opts.OnConflict
 	if conflict < Overwrite || conflict > Fail {
@@ -65,7 +66,7 @@ func Copy(source fs.FS, dest Writer, opts Options) (Stats, error) {
 			return fmt.Errorf("renderfs: stat %s: %w", rel, err)
 		}
 
-		renderedRel, skip, err := RenderPath(rel, d.IsDir(), context, opts.StrictVariables)
+		renderedRel, skip, err := RenderPathWithEnv(rel, d.IsDir(), context, opts.StrictVariables, env)
 		if err != nil {
 			return &RenderError{Kind: RenderErrorPath, Path: rel, Err: err}
 		}
@@ -99,7 +100,7 @@ func Copy(source fs.FS, dest Writer, opts Options) (Stats, error) {
 			return fmt.Errorf("renderfs: read %s: %w", rel, err)
 		}
 
-		finalBytes, err := RenderBytes(rawContent, context, opts.TemplateBinary, opts.StrictVariables)
+		finalBytes, err := RenderBytesWithEnv(rawContent, context, opts.TemplateBinary, opts.StrictVariables, env)
 		if err != nil {
 			return &RenderError{Kind: RenderErrorFile, Path: rel, Err: err}
 		}

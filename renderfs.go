@@ -3,6 +3,8 @@ package renderfs
 import (
 	"io"
 	"io/fs"
+
+	"github.com/nikolalohinski/gonja/v2/exec"
 )
 
 // Stats holds the results of a Copy operation.
@@ -30,6 +32,10 @@ type Options struct {
 	// Context provides template data when rendering path and file contents.
 	// When nil, an empty context is used.
 	Context map[string]any
+
+	// Environment provides the Gonja environment used for rendering templates.
+	// When nil, gonja.DefaultEnvironment is used.
+	Environment *exec.Environment
 
 	// StrictVariables causes rendering to fail if a template references
 	// an undefined variable.
