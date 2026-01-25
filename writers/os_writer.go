@@ -58,6 +58,11 @@ func (w *OSWriter) CreateFile(path string, perm fs.FileMode) (io.WriteCloser, er
 	return f, nil
 }
 
+// Open opens the named file for reading.
+func (w *OSWriter) Open(path string) (io.ReadCloser, error) {
+	return os.Open(w.join(path))
+}
+
 // Symlink creates a symbolic link within DestDir.
 func (w *OSWriter) Symlink(oldname, newname string) error {
 	full := w.join(newname)

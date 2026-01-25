@@ -90,6 +90,18 @@ func (w *MemoryWriter) CreateFile(p string, perm fs.FileMode) (io.WriteCloser, e
 	return &memoryFileWriteCloser{buf: file.Content}, nil
 }
 
+// Open creates a reader for the in-memory file.
+func (w *MemoryWriter) Open(p string) (io.ReadCloser, error) {
+	p = normalizePath(p)
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if file, ok := w.files[p]; ok {
+		return io.NopCloser(bytes.NewReader(file.Content.Bytes())), nil
+	}
+	return nil, fs.ErrNotExist
+}
+
 // Symlink records an in-memory symlink.
 func (w *MemoryWriter) Symlink(oldname, newname string) error {
 	newname = normalizePath(newname)

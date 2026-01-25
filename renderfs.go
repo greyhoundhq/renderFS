@@ -3,9 +3,15 @@ package renderfs
 import (
 	"io"
 	"io/fs"
-
-	"github.com/flosch/pongo2/v6"
 )
+
+// Stats holds the results of a Copy operation.
+type Stats struct {
+	Created   int
+	Updated   int
+	Skipped   int
+	Identical int
+}
 
 // ConflictResolution defines how Copy should behave when a destination file already exists.
 type ConflictResolution int
@@ -23,7 +29,16 @@ const (
 type Options struct {
 	// Context provides template data when rendering path and file contents.
 	// When nil, an empty context is used.
-	Context pongo2.Context
+	Context map[string]any
+
+	// StrictVariables causes rendering to fail if a template references
+	// an undefined variable.
+	StrictVariables bool
+
+	// TemplateBinary when true, renders binary files as templates.
+	// When false (default), binary files are copied without templating.
+	// Detection uses http.DetectContentType on the first 512 bytes.
+	TemplateBinary bool
 
 	// OnConflict controls how Copy reacts when the destination file already exists.
 	// Defaults to Overwrite when left zero-valued.
@@ -50,4 +65,8 @@ type Writer interface {
 	// Symlink creates a symbolic link named newname pointing to oldname. Writers
 	// that do not support symlinks should return an error such as fs.ErrInvalid.
 	Symlink(oldname, newname string) error
+
+	// Open opens the named file for reading. If the file does not exist, it must
+	// return an error satisfying fs.ErrNotExist.
+	Open(path string) (io.ReadCloser, error)
 }

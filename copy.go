@@ -1,33 +1,31 @@
 package renderfs
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"path"
 	"strings"
-
-	"github.com/flosch/pongo2/v6"
 )
 
-type statWriter interface {
-	Lstat(path string) (fs.FileInfo, error)
-}
+// Copy walks the source filesystem, renders templates, and writes to dest.
+// It returns statistics on files created, updated, skipped, or found identical.
+func Copy(source fs.FS, dest Writer, opts Options) (Stats, error) {
+	var stats Stats
 
-// Copy walks the source filesystem, renders templates for paths and file
-// contents, and writes the result to the provided Writer.
-func Copy(source fs.FS, dest Writer, opts Options) error {
 	if source == nil {
-		return fmt.Errorf("renderfs: source filesystem is required")
+		return stats, fmt.Errorf("renderfs: source filesystem is required")
 	}
 	if dest == nil {
-		return fmt.Errorf("renderfs: destination writer is required")
+		return stats, fmt.Errorf("renderfs: destination writer is required")
 	}
 
 	context := opts.Context
 	if context == nil {
-		context = pongo2.Context{}
+		context = map[string]any{}
 	}
 
 	conflict := opts.OnConflict
@@ -37,10 +35,10 @@ func Copy(source fs.FS, dest Writer, opts Options) error {
 
 	matcher, err := buildIgnoreMatcher(source, opts.IgnorePatterns)
 	if err != nil {
-		return err
+		return stats, err
 	}
 
-	return fs.WalkDir(source, ".", func(rel string, d fs.DirEntry, walkErr error) error {
+	err = fs.WalkDir(source, ".", func(rel string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -67,19 +65,15 @@ func Copy(source fs.FS, dest Writer, opts Options) error {
 			return fmt.Errorf("renderfs: stat %s: %w", rel, err)
 		}
 
-		renderedRel, skip, err := renderRelativePath(rel, d.IsDir(), context)
+		renderedRel, skip, err := RenderPath(rel, d.IsDir(), context, opts.StrictVariables)
 		if err != nil {
-			return fmt.Errorf("renderfs: render path %s: %w", rel, err)
+			return &RenderError{Kind: RenderErrorPath, Path: rel, Err: err}
 		}
 		if skip {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
-		}
-
-		if d.IsDir() {
-			return dest.MkdirAll(renderedRel, directoryMode(info))
 		}
 
 		if info.Mode()&fs.ModeSymlink != 0 {
@@ -90,15 +84,42 @@ func Copy(source fs.FS, dest Writer, opts Options) error {
 			if err := dest.Symlink(target, renderedRel); err != nil {
 				return fmt.Errorf("renderfs: create symlink %s -> %s: %w", renderedRel, target, err)
 			}
+			if d.IsDir() {
+				return fs.SkipDir
+			}
 			return nil
 		}
 
-		proceed, err := handleConflict(dest, renderedRel, conflict)
+		if d.IsDir() {
+			return dest.MkdirAll(renderedRel, directoryMode(info))
+		}
+
+		rawContent, err := fs.ReadFile(source, rel)
+		if err != nil {
+			return fmt.Errorf("renderfs: read %s: %w", rel, err)
+		}
+
+		finalBytes, err := RenderBytes(rawContent, context, opts.TemplateBinary, opts.StrictVariables)
+		if err != nil {
+			return &RenderError{Kind: RenderErrorFile, Path: rel, Err: err}
+		}
+
+		status, err := checkDestination(dest, renderedRel, finalBytes, conflict)
 		if err != nil {
 			return err
 		}
-		if !proceed {
+
+		switch status {
+		case statusIdentical:
+			stats.Identical++
 			return nil
+		case statusSkip:
+			stats.Skipped++
+			return nil
+		case statusUpdate:
+			stats.Updated++
+		case statusCreate:
+			stats.Created++
 		}
 
 		if parent := path.Dir(renderedRel); parent != "." {
@@ -107,58 +128,64 @@ func Copy(source fs.FS, dest Writer, opts Options) error {
 			}
 		}
 
-		content, err := fs.ReadFile(source, rel)
-		if err != nil {
-			return fmt.Errorf("renderfs: read %s: %w", rel, err)
-		}
-
-		renderedContent, err := renderTemplateString(string(content), context)
-		if err != nil {
-			return fmt.Errorf("renderfs: render file %s: %w", rel, err)
-		}
-
 		handle, err := dest.CreateFile(renderedRel, fileMode(info))
 		if err != nil {
 			return fmt.Errorf("renderfs: create %s: %w", renderedRel, err)
 		}
-		if _, err := io.WriteString(handle, renderedContent); err != nil {
-			handle.Close()
-			return fmt.Errorf("renderfs: write %s: %w", renderedRel, err)
+
+		_, writeErr := handle.Write(finalBytes)
+		closeErr := handle.Close()
+		if writeErr != nil {
+			return fmt.Errorf("renderfs: write %s: %w", renderedRel, writeErr)
 		}
-		if err := handle.Close(); err != nil {
-			return fmt.Errorf("renderfs: close %s: %w", renderedRel, err)
+		if closeErr != nil {
+			return fmt.Errorf("renderfs: close %s: %w", renderedRel, closeErr)
 		}
 
 		return nil
 	})
+
+	return stats, err
 }
 
-func renderRelativePath(rel string, isDir bool, ctx pongo2.Context) (string, bool, error) {
-	rendered, err := renderTemplateString(rel, ctx)
+type fileStatus int
+
+const (
+	statusCreate fileStatus = iota
+	statusUpdate
+	statusSkip
+	statusIdentical
+)
+
+func checkDestination(dest Writer, path string, newContent []byte, conflict ConflictResolution) (fileStatus, error) {
+	existing, err := dest.Open(path)
 	if err != nil {
-		return "", false, err
+		if errors.Is(err, fs.ErrNotExist) {
+			return statusCreate, nil
+		}
+		return 0, fmt.Errorf("renderfs: check destination %s: %w", path, err)
+	}
+	defer existing.Close()
+
+	oldContent, err := io.ReadAll(existing)
+	if err != nil {
+		return 0, fmt.Errorf("renderfs: read existing %s: %w", path, err)
 	}
 
-	rendered = strings.TrimSpace(rendered)
-	if rendered == "" {
-		return "", true, nil
+	if bytes.Equal(oldContent, newContent) {
+		return statusIdentical, nil
 	}
 
-	rendered = strings.ReplaceAll(rendered, "\\", "/")
-	clean := path.Clean(rendered)
-	if clean == "." {
-		return "", true, nil
+	switch conflict {
+	case Skip:
+		return statusSkip, nil
+	case Fail:
+		return 0, &RenderError{Kind: RenderErrorConflict, Path: path}
+	case Overwrite:
+		return statusUpdate, nil
+	default:
+		return statusUpdate, nil
 	}
-
-	if strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
-		return "", false, fmt.Errorf("renderfs: rendered path %q escapes destination", rendered)
-	}
-
-	if !isDir {
-		clean = stripTemplateSuffix(clean)
-	}
-
-	return clean, false, nil
 }
 
 func stripTemplateSuffix(p string) string {
@@ -169,37 +196,6 @@ func stripTemplateSuffix(p string) string {
 		return strings.TrimSuffix(p, ".tmpl")
 	default:
 		return p
-	}
-}
-
-func handleConflict(dest Writer, relPath string, resolution ConflictResolution) (bool, error) {
-	sw, ok := dest.(statWriter)
-	if !ok {
-		if resolution == Skip || resolution == Fail {
-			return false, fmt.Errorf("renderfs: destination writer does not support conflict detection for %s", relPath)
-		}
-		return true, nil
-	}
-
-	info, err := sw.Lstat(relPath)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return true, nil
-		}
-		return false, fmt.Errorf("renderfs: stat destination %s: %w", relPath, err)
-	}
-
-	if info.IsDir() {
-		return false, fmt.Errorf("renderfs: destination %s is a directory", relPath)
-	}
-
-	switch resolution {
-	case Skip:
-		return false, nil
-	case Fail:
-		return false, fmt.Errorf("renderfs: destination file %s exists", relPath)
-	default:
-		return true, nil
 	}
 }
 
@@ -228,4 +224,19 @@ func readSymlink(source fs.FS, rel string) (string, error) {
 		return rl.ReadLink(rel)
 	}
 	return "", fmt.Errorf("renderfs: source filesystem does not support symlinks")
+}
+
+func isBinary(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	sniff := data
+	if len(sniff) > 512 {
+		sniff = sniff[:512]
+	}
+	mimeType := http.DetectContentType(sniff)
+	return !strings.HasPrefix(mimeType, "text/") &&
+		!strings.Contains(mimeType, "json") &&
+		!strings.Contains(mimeType, "javascript") &&
+		!strings.Contains(mimeType, "xml")
 }
